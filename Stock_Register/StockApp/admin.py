@@ -253,60 +253,89 @@ from django.utils import timezone
 from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
-from .models import Complaint, ComplaintComment
+from .models import Complaint
 
 
-class ComplaintCommentInline(admin.TabularInline):
-    model = ComplaintComment
-    extra = 1
-    readonly_fields = ['author', 'created_at']
+# class ComplaintCommentInline(admin.TabularInline):
+#     model = ComplaintComment
+#     extra = 1
+#     readonly_fields = ['author', 'created_at']
     
-    def has_delete_permission(self, request, obj=None):
-        return request.user.is_superuser
+#     def has_delete_permission(self, request, obj=None):
+#         return request.user.is_superuser
     
-    def save_model(self, request, obj, form, change):
-        if not obj.author_id:
-            obj.author = request.user.account
-        super().save_model(request, obj, form, change)
+#     def save_model(self, request, obj, form, change):
+#         if not obj.author_id:
+#             obj.author = request.user.account
+#         super().save_model(request, obj, form, change)
 
 
 @admin.register(Complaint)
 class ComplaintAdmin(ModelAdmin):
     list_display = [
         'title', 'priority', 'status', 'department',
-        'submitted_by', 'assigned_to', 'created_at',
-        'get_comments_count'
-    ]
+        'submitted_by', 'assigned_to', 'created_at'
+    ]  # Removed get_comments_count since it's not being used
     list_filter = ['status', 'priority', 'department', 'created_at']
     search_fields = ['title', 'description', 'submitted_by__user__username']
     readonly_fields = ['created_at', 'updated_at', 'submitted_by']
-    inlines = [ComplaintCommentInline]
     date_hierarchy = 'created_at'
     list_per_page = 20
 
-    fieldsets = [
-        (
-            _("Complaint Information"),
-            {
-                "fields": ['title', 'description', 'department', 'priority'],
-            },
-        ),
-        (
-            _("Status & Assignment"),
-            {
-                "fields": ['status', 'assigned_to', 'resolution_notes', 'resolution_date'],
-            },
-        ),
-        (
-            _("Timestamps"),
-            {
-                "fields": ['created_at', 'updated_at'],
-                "classes": ['collapse'],
-            },
-        ),
-    ]
+    def get_fieldsets(self, request, obj=None):
+        # Base fieldsets that all users can see
+        base_fieldsets = [
+            (
+                _("Complaint Information"),
+                {
+                    "fields": ['title', 'description', 'department', 'priority'],
+                },
+            ),
+            (
+                _("Timestamps"),
+                {
+                    "fields": ['created_at', 'updated_at'],
+                    "classes": ['collapse'],
+                },
+            ),
+        ]
+        
+        # Only add Status & Assignment fieldset for admin and superuser
+        if request.user.is_superuser or (hasattr(request.user, 'account') and request.user.account.role == 'admin'):
+            base_fieldsets.insert(1, (
+                _("Status & Assignment"),
+                {
+                    "fields": ['status', 'assigned_to', 'resolution_notes', 'resolution_date'],
+                },
+            ))
+        
+        return base_fieldsets
 
-    actions = ['mark_in_progress', 'mark_resolved', 'mark_closed', 'assign_to_me']
+    def get_list_display(self, request):
+        # Modify list display based on user role
+        if request.user.is_superuser or (hasattr(request.user, 'account') and request.user.account.role == 'admin'):
+            return self.list_display
+        return ['title', 'priority', 'department', 'created_at']
+
+    def get_readonly_fields(self, request, obj=None):
+        if request.user.is_superuser:
+            return self.readonly_fields
+        
+        try:
+            account = request.user.account
+            if account.role == 'admin':
+                return self.readonly_fields
+            elif account.role == 'staff':
+                if obj:  # Existing complaint
+                    return [f.name for f in self.model._meta.fields]
+                # New complaint - staff can only edit basic fields
+                return ['created_at', 'updated_at', 'submitted_by', 
+                       'status', 'assigned_to', 'resolution_notes', 
+                       'resolution_date']
+        except Account.DoesNotExist:
+            pass
+        
+        return self.readonly_fields
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -323,41 +352,37 @@ class ComplaintAdmin(ModelAdmin):
         except Account.DoesNotExist:
             return qs.none()
 
-    def get_readonly_fields(self, request, obj=None):
-        if request.user.is_superuser:
-            return self.readonly_fields
-        
-        try:
-            account = request.user.account
-            if account.role == 'admin':
-                return self.readonly_fields
-            elif account.role == 'staff':
-                # Staff can only view most fields after creating
-                if obj:
-                    return [f.name for f in self.model._meta.fields]
-                return ['created_at', 'updated_at', 'submitted_by']
-        except Account.DoesNotExist:
-            pass
-        
-        return self.readonly_fields
-
     def save_model(self, request, obj, form, change):
         if not change:  # New complaint
             obj.submitted_by = request.user.account
         super().save_model(request, obj, form, change)
 
-    def save_formset(self, request, form, formset, change):
-        instances = formset.save(commit=False)
-        for instance in instances:
-            if isinstance(instance, ComplaintComment):
-                if not instance.author_id:
-                    instance.author = request.user.account
-            instance.save()
-        formset.save_m2m()
+    def has_change_permission(self, request, obj=None):
+        if not obj:
+            return True
+        
+        if request.user.is_superuser:
+            return True
+            
+        try:
+            account = request.user.account
+            if account.role == 'admin':
+                return True
+            elif account.role == 'staff':
+                return obj.submitted_by == account and obj.status == 'pending'
+        except Account.DoesNotExist:
+            pass
+        
+        return False
 
-    def get_comments_count(self, obj):
-        return obj.comments.count()
-    get_comments_count.short_description = _('Comments')
+    actions = ['mark_in_progress', 'mark_resolved', 'mark_closed', 'assign_to_me']
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not (request.user.is_superuser or 
+                (hasattr(request.user, 'account') and request.user.account.role == 'admin')):
+            return []
+        return actions
 
     def mark_in_progress(self, request, queryset):
         queryset.update(
@@ -388,21 +413,3 @@ class ComplaintAdmin(ModelAdmin):
             updated_at=timezone.now()
         )
     assign_to_me.short_description = _("Assign selected complaints to me")
-
-    def has_change_permission(self, request, obj=None):
-        if not obj:
-            return True
-        
-        if request.user.is_superuser:
-            return True
-            
-        try:
-            account = request.user.account
-            if account.role == 'admin':
-                return True
-            elif account.role == 'staff':
-                return obj.submitted_by == account and obj.status == 'pending'
-        except Account.DoesNotExist:
-            pass
-        
-        return False

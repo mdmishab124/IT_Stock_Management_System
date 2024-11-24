@@ -297,29 +297,29 @@ class Complaint(models.Model):
         super().save(*args, **kwargs)
 
 
-class ComplaintComment(models.Model):
-    complaint = models.ForeignKey(
-        Complaint,
-        on_delete=models.CASCADE,
-        related_name='comments',
-        verbose_name=_("Complaint")
-    )
-    author = models.ForeignKey(
-        'Account',
-        on_delete=models.CASCADE,
-        related_name='complaint_comments',
-        verbose_name=_("Author")
-    )
-    comment = models.TextField(
-        verbose_name=_("Comment")
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+# class ComplaintComment(models.Model):
+#     complaint = models.ForeignKey(
+#         Complaint,
+#         on_delete=models.CASCADE,
+#         related_name='comments',
+#         verbose_name=_("Complaint")
+#     )
+#     author = models.ForeignKey(
+#         'Account',
+#         on_delete=models.CASCADE,
+#         related_name='complaint_comments',
+#         verbose_name=_("Author")
+#     )
+#     comment = models.TextField(
+#         verbose_name=_("Comment")
+#     )
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        verbose_name = _("Complaint Comment")
-        verbose_name_plural = _("Complaint Comments")
-        ordering = ['created_at']
+#     class Meta:
+#         verbose_name = _("Complaint Comment")
+#         verbose_name_plural = _("Complaint Comments")
+#         ordering = ['created_at']
 
-    def __str__(self):
-        return f"Comment by {self.author} on {self.complaint}"
+#     def __str__(self):
+#         return f"Comment by {self.author} on {self.complaint}"
